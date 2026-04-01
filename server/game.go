@@ -1,6 +1,6 @@
 package server
 
-type GameState struct {
+type Location struct {
 	X int
 	Y int
 }
@@ -12,19 +12,33 @@ func NewGame() *Game {
 	return &Game{}
 }
 
-func (g *Game) UpdateState(player *Player, state *GameState) {
-	if state.X < 0 {
-		state.X = 0
+func (g *Game) UpdateLocation(player *Player, location *Location) {
+	if location.X < 0 {
+		location.X = 0
 	}
-	if state.Y < 0 {
-		state.Y = 0
+	if location.Y < 0 {
+		location.Y = 0
 	}
-	player.GameState = state
+	player.Location = location
 }
 
-func DecodeGameState(state *StatePacket) *GameState {
-	return &GameState{
-		X: int(state.X),
-		Y: int(state.Y),
+func (g *Game) UpdateHp(player *Player, value int32) {
+	if value < 0 {
+		player.HP -= value
+		if player.HP < 0 {
+			player.HP = 0
+		}
+	} else {
+		player.HP += value
+		if player.HP > 100 {
+			player.HP = 100
+		}
+	}
+}
+
+func DecodeLocation(locPacket *LocationPacket) *Location {
+	return &Location{
+		X: int(locPacket.X),
+		Y: int(locPacket.Y),
 	}
 }

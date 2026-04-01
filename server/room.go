@@ -6,16 +6,18 @@ import (
 )
 
 type Player struct {
-	ID        int32
-	Addr      *net.UDPAddr
-	GameState *GameState
+	ID       int32
+	Addr     *net.UDPAddr
+	Location *Location
+	HP       int32
 }
 
 func NewPlayer(addr *net.UDPAddr, id int32) *Player {
 	player := &Player{
-		ID:        id,
-		Addr:      addr,
-		GameState: &GameState{},
+		ID:       id,
+		Addr:     addr,
+		Location: &Location{},
+		HP:       100,
 	}
 	return player
 }

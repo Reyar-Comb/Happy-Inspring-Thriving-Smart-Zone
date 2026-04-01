@@ -59,10 +59,10 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 	opCode := packet[0]
 
 	switch opCode {
-	case OpStateUpdate:
-		state, err := DecodeStatePacket(packet)
+	case OpLocationUpdate:
+		state, err := DecodeLocationPacket(packet)
 		if err != nil {
-			fmt.Printf("Server: Error decoding state packet from %s: %v\n", clientAddr, err)
+			fmt.Printf("Server: Error decoding location packet from %s: %v\n", clientAddr, err)
 			return
 		}
 
@@ -74,16 +74,16 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 				return
 			}
 
-			room.Engine.UpdateState(player, DecodeGameState(state))
+			room.Engine.UpdateLocation(player, DecodeLocation(state))
 
 			s.Sender.PlayerBroadcast(
 				room,
 				state.PlayerID,
-				EncodeStatePacket(
-					&StatePacket{
+				EncodeLocationPacket(
+					&LocationPacket{
 						PlayerID: state.PlayerID,
-						X:        int32(player.GameState.X),
-						Y:        int32(player.GameState.Y),
+						X:        int32(player.Location.X),
+						Y:        int32(player.Location.Y),
 					},
 				),
 			)
@@ -109,5 +109,57 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 				&AcceptPacket{PlayerID: player.ID},
 			))
 
+	case OpHit:
+		hitPacket, err := DecodeHitPacket(packet)
+		if err != nil {
+			fmt.Printf("Server: Error decoding hit packet from %s: %v\n", clientAddr, err)
+			return
+		}
+
+		if len(s.Rooms) > 0 {
+			room := s.Rooms[0]
+
+			player, exists := room.Players[hitPacket.PlayerID]
+			if !exists {
+				return
+			}
+
+			room.Engine.UpdateHp(player, hitPacket.Damage)
+
+			s.Sender.PlayerBroadcast(
+				room,
+				hitPacket.PlayerID,
+				EncodeHpPacket(
+					&HpPacket{
+						PlayerID: hitPacket.PlayerID,
+						Hp:       player.HP,
+					},
+				),
+			)
+		}
+
+	case OpShoot:
+		shootPacket, err := DecodeShootPacket(packet)
+		if err != nil {
+			fmt.Printf("Server: Error decoding shoot packet from %s: %v\n", clientAddr, err)
+			return
+		}
+
+		if len(s.Rooms) > 0 {
+			room := s.Rooms[0]
+
+			_, exists := room.Players[shootPacket.PlayerID]
+			if !exists {
+				return
+			}
+
+			s.Sender.PlayerBroadcast(
+				room,
+				shootPacket.PlayerID,
+				EncodeShootPacket(shootPacket),
+			)
+		}
+
+		fmt.Println("Server: Shoot")
 	}
 }
