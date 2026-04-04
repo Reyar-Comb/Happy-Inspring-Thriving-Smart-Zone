@@ -23,16 +23,12 @@ func (g *Game) UpdateLocation(player *Player, location *Location) {
 }
 
 func (g *Game) UpdateHp(player *Player, value int32) {
-	if value < 0 {
-		player.HP -= value
-		if player.HP < 0 {
-			player.HP = 0
-		}
-	} else {
-		player.HP += value
-		if player.HP > 100 {
-			player.HP = 100
-		}
+	player.HP += value
+	if player.HP < 0 {
+		player.HP = 0
+	}
+	if player.HP > 100 {
+		player.HP = 100
 	}
 }
 

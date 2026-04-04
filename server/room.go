@@ -41,3 +41,12 @@ func (r *Room) AddPlayer(player *Player) {
 	r.Players[player.ID] = player
 	fmt.Printf("Room: Added player %d\n", player.ID)
 }
+
+func GetAnotherPlayer(room *Room, player *Player) *Player {
+	for _, p := range room.Players {
+		if p.ID != player.ID {
+			return p
+		}
+	}
+	return nil
+}

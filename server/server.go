@@ -123,16 +123,18 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 			if !exists {
 				return
 			}
+			target := GetAnotherPlayer(room, player)
+			if target == nil {
+				return
+			}
+			room.Engine.UpdateHp(target, -hitPacket.Damage)
 
-			room.Engine.UpdateHp(player, hitPacket.Damage)
-
-			s.Sender.PlayerBroadcast(
+			s.Sender.RoomBroadcast(
 				room,
-				hitPacket.PlayerID,
 				EncodeHpPacket(
 					&HpPacket{
-						PlayerID: hitPacket.PlayerID,
-						Hp:       player.HP,
+						PlayerID: target.ID,
+						Hp:       target.HP,
 					},
 				),
 			)
