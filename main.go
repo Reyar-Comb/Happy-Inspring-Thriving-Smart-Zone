@@ -10,11 +10,10 @@ import (
 func main() {
 	config.InitConfig()
 
-	room := server.NewRoom()
-
 	s := &server.Server{
-		Addr:  net.JoinHostPort("", config.GlobalConfig.Port),
-		Rooms: []*server.Room{room},
+		Addr:           net.JoinHostPort("", config.GlobalConfig.Port),
+		Rooms:          map[int32]*server.Room{},
+		AvailableRooms: map[int32]*server.Room{},
 	}
 
 	err := server.Start(s)

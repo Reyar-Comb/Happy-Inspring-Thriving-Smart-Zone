@@ -8,13 +8,17 @@ import (
 )
 
 type Server struct {
-	Addr   string
-	Conn   *net.UDPConn
-	Rooms  []*Room
-	Sender *Sender
+	Addr           string
+	Conn           *net.UDPConn
+	Rooms          map[int32]*Room
+	AvailableRooms map[int32]*Room
+	Sender         *Sender
 }
 
-var id int32 = 1001
+var playerId int32 = 1001
+var roomId int32 = 1
+
+var PlayerRoomID = make(map[int32]int32)
 
 func Start(s *Server) error {
 	udpAddr, err := net.ResolveUDPAddr("udp", config.GlobalConfig.Port)
@@ -47,8 +51,38 @@ func Start(s *Server) error {
 }
 
 func (s *Server) AddRoom(room *Room) {
-	s.Rooms = append(s.Rooms, room)
-	fmt.Printf("Server: Added new room, total rooms: %d\n", len(s.Rooms))
+	s.Rooms[room.ID] = room
+	fmt.Printf("Server: Added new room, total rooms: ")
+	for id := range s.Rooms {
+		fmt.Printf("%d ", id)
+	}
+	fmt.Printf("\n")
+}
+
+func (s *Server) RemoveRoom(roomID int32) {
+	delete(s.Rooms, roomID)
+	fmt.Printf("Server: Removed room %d, total rooms: %d\n", roomID, len(s.Rooms))
+}
+
+func (s *Server) MatchRoom() *Room {
+	for _, room := range s.AvailableRooms {
+		if !room.IsFull() {
+			return room
+		}
+	}
+	room := NewRoom(roomId)
+	roomId++
+	s.AddRoom(room)
+	s.AvailableRooms[room.ID] = room
+	return room
+}
+
+func (s *Server) GetRoomByPlayerId(pid int32) *Room {
+	room, exists := s.Rooms[PlayerRoomID[pid]]
+	if !exists {
+		return nil
+	}
+	return room
 }
 
 func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
@@ -59,6 +93,29 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 	opCode := packet[0]
 
 	switch opCode {
+	case OpJoin:
+
+		room := s.MatchRoom()
+
+		playerID := playerId
+		playerId++
+
+		player := NewPlayer(clientAddr, playerID)
+		room.AddPlayer(player)
+		PlayerRoomID[playerID] = room.ID
+
+		if room.IsFull() {
+			fmt.Println("Server: Room is full, removing from available rooms")
+			delete(s.AvailableRooms, room.ID)
+		}
+
+		fmt.Printf("Server: Player %d joined room %d\n", playerID, room.ID)
+		s.Sender.SendTo(
+			player.Addr,
+			EncodeAcceptPacket(
+				&AcceptPacket{PlayerID: player.ID},
+			))
+
 	case OpLocationUpdate:
 		state, err := DecodeLocationPacket(packet)
 		if err != nil {
@@ -67,7 +124,7 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 		}
 
 		if len(s.Rooms) > 0 {
-			room := s.Rooms[0]
+			room := s.GetRoomByPlayerId(state.PlayerID)
 
 			player, exsists := room.Players[state.PlayerID]
 			if !exsists {
@@ -89,26 +146,6 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 			)
 		}
 
-	case OpJoin:
-		if len(s.Rooms) == 0 {
-			room := NewRoom()
-			s.AddRoom(room)
-		}
-
-		room := s.Rooms[0]
-
-		playerID := id
-		id++
-
-		player := NewPlayer(clientAddr, playerID)
-		room.AddPlayer(player)
-
-		s.Sender.SendTo(
-			player.Addr,
-			EncodeAcceptPacket(
-				&AcceptPacket{PlayerID: player.ID},
-			))
-
 	case OpHit:
 		hitPacket, err := DecodeHitPacket(packet)
 		if err != nil {
@@ -117,7 +154,7 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 		}
 
 		if len(s.Rooms) > 0 {
-			room := s.Rooms[0]
+			room := s.GetRoomByPlayerId(hitPacket.PlayerID)
 
 			player, exists := room.Players[hitPacket.PlayerID]
 			if !exists {
@@ -148,7 +185,7 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 		}
 
 		if len(s.Rooms) > 0 {
-			room := s.Rooms[0]
+			room := s.GetRoomByPlayerId(shootPacket.PlayerID)
 
 			_, exists := room.Players[shootPacket.PlayerID]
 			if !exists {
@@ -161,7 +198,5 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 				EncodeShootPacket(shootPacket),
 			)
 		}
-
-		fmt.Println("Server: Shoot")
 	}
 }

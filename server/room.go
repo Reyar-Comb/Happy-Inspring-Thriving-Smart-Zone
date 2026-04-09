@@ -25,12 +25,14 @@ func NewPlayer(addr *net.UDPAddr, id int32) *Player {
 type Room struct {
 	Players map[int32]*Player
 	Engine  *Game
+	ID      int32
 }
 
-func NewRoom() *Room {
+func NewRoom(id int32) *Room {
 	return &Room{
 		Players: make(map[int32]*Player),
 		Engine:  NewGame(),
+		ID:      id,
 	}
 }
 
@@ -40,6 +42,15 @@ func (r *Room) AddPlayer(player *Player) {
 	}
 	r.Players[player.ID] = player
 	fmt.Printf("Room: Added player %d\n", player.ID)
+}
+
+func (r *Room) RemovePlayer(playerID int32) {
+	delete(r.Players, playerID)
+	fmt.Printf("Room: Removed player %d\n", playerID)
+}
+
+func (r *Room) IsFull() bool {
+	return len(r.Players) >= 2
 }
 
 func GetAnotherPlayer(room *Room, player *Player) *Player {

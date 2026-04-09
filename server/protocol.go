@@ -12,6 +12,7 @@ const (
 	OpHpUpdate       byte = 0x04
 	OpShoot          byte = 0x05
 	OpHit            byte = 0x06
+	OpOver           byte = 0x07
 )
 
 type LocationPacket struct {
