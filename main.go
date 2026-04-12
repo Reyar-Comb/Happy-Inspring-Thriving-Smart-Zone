@@ -1,8 +1,6 @@
 package main
 
 import (
-	"net"
-
 	"github.com/Reyar-Comb/HITPlane/config"
 	"github.com/Reyar-Comb/HITPlane/server"
 )
@@ -10,13 +8,9 @@ import (
 func main() {
 	config.InitConfig()
 
-	s := &server.Server{
-		Addr:           net.JoinHostPort("", config.GlobalConfig.Port),
-		Rooms:          map[int32]*server.Room{},
-		AvailableRooms: map[int32]*server.Room{},
-	}
+	s := server.NewServer()
 
-	err := server.Start(s)
+	err := s.StartUDP()
 	if err != nil {
 		panic(err)
 	}

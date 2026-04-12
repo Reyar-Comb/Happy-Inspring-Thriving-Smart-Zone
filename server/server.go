@@ -3,24 +3,38 @@ package server
 import (
 	"fmt"
 	"net"
+	"sync"
 
 	"github.com/Reyar-Comb/HITPlane/config"
 )
 
 type Server struct {
-	Addr           string
-	Conn           *net.UDPConn
-	Rooms          map[int32]*Room
-	AvailableRooms map[int32]*Room
-	Sender         *Sender
+	mu sync.RWMutex
+
+	// UDP
+	Addr   string
+	Conn   *net.UDPConn
+	Sender *Sender
+
+	// Game state
+	Rooms           map[int32]*Room
+	AvailableRooms  map[int32]*Room
+	PlayerRoomID    map[int32]int32
+	PlayerIdCounter int32
+	RoomIdCounter   int32
 }
 
-var playerId int32 = 1001
-var roomId int32 = 1
+func NewServer() *Server {
+	return &Server{
+		Rooms:           make(map[int32]*Room),
+		AvailableRooms:  make(map[int32]*Room),
+		PlayerRoomID:    make(map[int32]int32),
+		PlayerIdCounter: 1001,
+		RoomIdCounter:   1,
+	}
+}
 
-var PlayerRoomID = make(map[int32]int32)
-
-func Start(s *Server) error {
+func (s *Server) StartUDP() error {
 	udpAddr, err := net.ResolveUDPAddr("udp", config.GlobalConfig.Port)
 	if err != nil {
 		return err
@@ -33,7 +47,7 @@ func Start(s *Server) error {
 	s.Sender = NewSender(conn)
 	defer conn.Close()
 
-	fmt.Println("Server: Listening on", s.Addr)
+	fmt.Println("Server: Listening on", config.GlobalConfig.Port)
 
 	buffer := make([]byte, 1024)
 
@@ -45,11 +59,13 @@ func Start(s *Server) error {
 		}
 
 		packet := buffer[:n]
-
 		s.handlePacket(packet, clientAddr)
 	}
 }
 
+// ----------------------------------------------------------
+// Room management
+// ----------------------------------------------------------
 func (s *Server) AddRoom(room *Room) {
 	s.Rooms[room.ID] = room
 	fmt.Printf("Server: Added new room, total rooms: ")
@@ -70,21 +86,24 @@ func (s *Server) MatchRoom() *Room {
 			return room
 		}
 	}
-	room := NewRoom(roomId)
-	roomId++
+	room := NewRoom(s.RoomIdCounter)
+	s.RoomIdCounter++
 	s.AddRoom(room)
 	s.AvailableRooms[room.ID] = room
 	return room
 }
 
 func (s *Server) GetRoomByPlayerId(pid int32) *Room {
-	room, exists := s.Rooms[PlayerRoomID[pid]]
+	room, exists := s.Rooms[s.PlayerRoomID[pid]]
 	if !exists {
 		return nil
 	}
 	return room
 }
 
+// ----------------------------------------------------------
+// Packet handling
+// ----------------------------------------------------------
 func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 	if len(packet) == 0 {
 		return
@@ -94,109 +113,134 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 
 	switch opCode {
 	case OpJoin:
-
-		room := s.MatchRoom()
-
-		playerID := playerId
-		playerId++
-
-		player := NewPlayer(clientAddr, playerID)
-		room.AddPlayer(player)
-		PlayerRoomID[playerID] = room.ID
-
-		if room.IsFull() {
-			fmt.Println("Server: Room is full, removing from available rooms")
-			delete(s.AvailableRooms, room.ID)
-		}
-
-		fmt.Printf("Server: Player %d joined room %d\n", playerID, room.ID)
-		s.Sender.SendTo(
-			player.Addr,
-			EncodeAcceptPacket(
-				&AcceptPacket{PlayerID: player.ID},
-			))
-
+		s.handleJoin(packet, clientAddr)
 	case OpLocationUpdate:
-		state, err := DecodeLocationPacket(packet)
-		if err != nil {
-			fmt.Printf("Server: Error decoding location packet from %s: %v\n", clientAddr, err)
-			return
-		}
-
-		if len(s.Rooms) > 0 {
-			room := s.GetRoomByPlayerId(state.PlayerID)
-
-			player, exsists := room.Players[state.PlayerID]
-			if !exsists {
-				return
-			}
-
-			room.Engine.UpdateLocation(player, DecodeLocation(state))
-
-			s.Sender.PlayerBroadcast(
-				room,
-				state.PlayerID,
-				EncodeLocationPacket(
-					&LocationPacket{
-						PlayerID: state.PlayerID,
-						X:        int32(player.Location.X),
-						Y:        int32(player.Location.Y),
-					},
-				),
-			)
-		}
-
+		s.handleLocationUpdate(packet, clientAddr)
 	case OpHit:
-		hitPacket, err := DecodeHitPacket(packet)
-		if err != nil {
-			fmt.Printf("Server: Error decoding hit packet from %s: %v\n", clientAddr, err)
-			return
-		}
-
-		if len(s.Rooms) > 0 {
-			room := s.GetRoomByPlayerId(hitPacket.PlayerID)
-
-			player, exists := room.Players[hitPacket.PlayerID]
-			if !exists {
-				return
-			}
-			target := GetAnotherPlayer(room, player)
-			if target == nil {
-				return
-			}
-			room.Engine.UpdateHp(target, -hitPacket.Damage)
-
-			s.Sender.RoomBroadcast(
-				room,
-				EncodeHpPacket(
-					&HpPacket{
-						PlayerID: target.ID,
-						Hp:       target.HP,
-					},
-				),
-			)
-		}
-
+		s.handleHit(packet, clientAddr)
 	case OpShoot:
-		shootPacket, err := DecodeShootPacket(packet)
-		if err != nil {
-			fmt.Printf("Server: Error decoding shoot packet from %s: %v\n", clientAddr, err)
-			return
-		}
-
-		if len(s.Rooms) > 0 {
-			room := s.GetRoomByPlayerId(shootPacket.PlayerID)
-
-			_, exists := room.Players[shootPacket.PlayerID]
-			if !exists {
-				return
-			}
-
-			s.Sender.PlayerBroadcast(
-				room,
-				shootPacket.PlayerID,
-				EncodeShootPacket(shootPacket),
-			)
-		}
+		s.handleShoot(packet, clientAddr)
+	default:
+		fmt.Printf("Server: Received unknown packet from %s: %x\n", clientAddr, packet)
 	}
+}
+
+func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
+	s.mu.Lock()
+
+	room := s.MatchRoom()
+
+	playerID := s.PlayerIdCounter
+	s.PlayerIdCounter++
+
+	player := NewPlayer(clientAddr, playerID)
+	room.AddPlayer(player)
+	s.PlayerRoomID[playerID] = room.ID
+
+	if room.IsFull() {
+		fmt.Println("Server: Room is full, removing from available rooms")
+		delete(s.AvailableRooms, room.ID)
+	}
+
+	s.mu.Unlock()
+
+	fmt.Printf("Server: Player %d joined room %d\n", playerID, room.ID)
+	s.Sender.SendTo(
+		player.Addr,
+		EncodeAcceptPacket(
+			&AcceptPacket{PlayerID: player.ID},
+		))
+}
+
+func (s *Server) handleLocationUpdate(packet []byte, clientAddr *net.UDPAddr) {
+	s.mu.RLock()
+	location, err := DecodeLocationPacket(packet)
+	if err != nil {
+		fmt.Printf("Server: Error decoding location packet from %s: %v\n", clientAddr, err)
+		s.mu.RUnlock()
+		return
+	}
+
+	room := s.GetRoomByPlayerId(location.PlayerID)
+	player, exists := room.Players[location.PlayerID]
+	if !exists {
+		s.mu.RUnlock()
+		return
+	}
+
+	room.Engine.UpdateLocation(player, DecodeLocation(location))
+
+	s.mu.RUnlock()
+
+	s.Sender.PlayerBroadcast(
+		room,
+		location.PlayerID,
+		EncodeLocationPacket(
+			&LocationPacket{
+				PlayerID: location.PlayerID,
+				X:        int32(player.Location.X),
+				Y:        int32(player.Location.Y),
+			},
+		),
+	)
+}
+
+func (s *Server) handleHit(packet []byte, clientAddr *net.UDPAddr) {
+	s.mu.Lock()
+	hitPacket, err := DecodeHitPacket(packet)
+	if err != nil {
+		fmt.Printf("Server: Error decoding hit packet from %s: %v\n", clientAddr, err)
+		s.mu.Unlock()
+		return
+	}
+
+	room := s.GetRoomByPlayerId(hitPacket.PlayerID)
+	player, exists := room.Players[hitPacket.PlayerID]
+	if !exists {
+		s.mu.Unlock()
+		return
+	}
+	target := GetAnotherPlayer(room, player)
+	if target == nil {
+		s.mu.Unlock()
+		return
+	}
+	room.Engine.UpdateHp(target, -hitPacket.Damage)
+
+	s.mu.Unlock()
+
+	s.Sender.RoomBroadcast(
+		room,
+		EncodeHpPacket(
+			&HpPacket{
+				PlayerID: target.ID,
+				Hp:       target.HP,
+			},
+		),
+	)
+}
+
+func (s *Server) handleShoot(packet []byte, clientAddr *net.UDPAddr) {
+	s.mu.RLock()
+	shootPacket, err := DecodeShootPacket(packet)
+	if err != nil {
+		fmt.Printf("Server: Error decoding shoot packet from %s: %v\n", clientAddr, err)
+		s.mu.RUnlock()
+		return
+	}
+
+	room := s.GetRoomByPlayerId(shootPacket.PlayerID)
+	_, exists := room.Players[shootPacket.PlayerID]
+	if !exists {
+		s.mu.RUnlock()
+		return
+	}
+
+	s.mu.RUnlock()
+
+	s.Sender.PlayerBroadcast(
+		room,
+		shootPacket.PlayerID,
+		EncodeShootPacket(shootPacket),
+	)
 }
