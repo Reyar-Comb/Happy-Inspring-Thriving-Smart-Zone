@@ -10,6 +10,8 @@ func main() {
 
 	s := server.NewServer()
 
+	go s.StartHTTP()
+
 	err := s.StartUDP()
 	if err != nil {
 		panic(err)

@@ -1,9 +1,11 @@
 package server
 
 import (
+	"encoding/binary"
 	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/Reyar-Comb/HITPlane/config"
 )
@@ -22,6 +24,10 @@ type Server struct {
 	PlayerRoomID    map[int32]int32
 	PlayerIdCounter int32
 	RoomIdCounter   int32
+
+	// HTTP
+	Users    *UserStore
+	Sessions *SessionManager
 }
 
 func NewServer() *Server {
@@ -31,11 +37,13 @@ func NewServer() *Server {
 		PlayerRoomID:    make(map[int32]int32),
 		PlayerIdCounter: 1001,
 		RoomIdCounter:   1,
+		Users:           NewUserStore(),
+		Sessions:        NewSessionManager(),
 	}
 }
 
 func (s *Server) StartUDP() error {
-	udpAddr, err := net.ResolveUDPAddr("udp", config.GlobalConfig.Port)
+	udpAddr, err := net.ResolveUDPAddr("udp", config.GlobalConfig.UDPPort)
 	if err != nil {
 		return err
 	}
@@ -47,7 +55,7 @@ func (s *Server) StartUDP() error {
 	s.Sender = NewSender(conn)
 	defer conn.Close()
 
-	fmt.Println("Server: Listening on", config.GlobalConfig.Port)
+	fmt.Println("Server: UDP server listening on", config.GlobalConfig.UDPPort)
 
 	buffer := make([]byte, 1024)
 
@@ -126,10 +134,29 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 }
 
 func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
+	if len(packet) < 5 {
+		return
+	}
+
+	sessionLen := int(binary.BigEndian.Uint32(packet[1:5]))
+	if len(packet) < 5+sessionLen {
+		return
+	}
+
+	sessionID := string(packet[5 : 5+sessionLen])
+
 	s.mu.Lock()
+	session, exists := s.Sessions.Get(sessionID)
+	if !exists {
+		fmt.Printf("Server: Invalid session ID from %s: %s\n", clientAddr, sessionID)
+		s.mu.Unlock()
+		return
+	}
+
+	session.LastActive = time.Now()
+	fmt.Printf("Server: Valid Player %s Joined, Sending PlayerID %d\n", sessionID, s.PlayerIdCounter)
 
 	room := s.MatchRoom()
-
 	playerID := s.PlayerIdCounter
 	s.PlayerIdCounter++
 

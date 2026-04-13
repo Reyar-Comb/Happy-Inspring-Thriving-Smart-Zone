@@ -8,8 +8,9 @@ import (
 )
 
 type Config struct {
-	Port    string `yaml:"port" env-default:":8888"`
-	Timeout string `yaml:"timeout" env-default:"5s"`
+	UDPPort  string `yaml:"udp_port" env-default:":8888"`
+	HTTPPort string `yaml:"http_port" env-default:":8889"`
+	Timeout  string `yaml:"timeout" env-default:"5s"`
 }
 
 var GlobalConfig *Config
