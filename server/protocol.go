@@ -44,6 +44,10 @@ type AcceptPacket struct {
 	PlayerID int32
 }
 
+type OverPacket struct {
+	WinnerPlayerID int32
+}
+
 var ErrInvalidPacket = errors.New("invalid packet")
 
 func DecodeLocationPacket(data []byte) (*LocationPacket, error) {
@@ -115,5 +119,12 @@ func EncodeAcceptPacket(packet *AcceptPacket) []byte {
 	buf := make([]byte, 5)
 	buf[0] = OpAccept
 	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
+	return buf
+}
+
+func EncodeOverPacket(packet *OverPacket) []byte {
+	buf := make([]byte, 5)
+	buf[0] = OpOver
+	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.WinnerPlayerID))
 	return buf
 }

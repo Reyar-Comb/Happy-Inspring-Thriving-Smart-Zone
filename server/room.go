@@ -10,6 +10,7 @@ type Player struct {
 	Addr     *net.UDPAddr
 	Location *Location
 	HP       int32
+	Room     *Room
 }
 
 func NewPlayer(addr *net.UDPAddr, id int32) *Player {
@@ -41,6 +42,8 @@ func (r *Room) AddPlayer(player *Player) {
 		return
 	}
 	r.Players[player.ID] = player
+	player.Room = r
+
 	fmt.Printf("Room: Added player %d\n", player.ID)
 }
 
@@ -60,4 +63,11 @@ func GetAnotherPlayer(room *Room, player *Player) *Player {
 		}
 	}
 	return nil
+}
+
+func (p *Player) GetOpponent() *Player {
+	if p.Room == nil {
+		return nil
+	}
+	return GetAnotherPlayer(p.Room, p)
 }

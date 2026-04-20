@@ -22,13 +22,25 @@ func (g *Game) UpdateLocation(player *Player, location *Location) {
 	player.Location = location
 }
 
-func (g *Game) UpdateHp(player *Player, value int32) {
+func (g *Game) UpdateHp(player *Player, value int32) bool {
+	prevHP := player.HP
 	player.HP += value
-	if player.HP < 0 {
-		player.HP = 0
+	if player.HP < 0 && prevHP > 0 {
+		return false
 	}
 	if player.HP > 100 {
 		player.HP = 100
+	}
+	return true
+}
+
+func (g *Game) GameOver(winner *Player) {
+	if winner == nil {
+		return
+	}
+	room := winner.Room
+	if room == nil {
+		return
 	}
 }
 

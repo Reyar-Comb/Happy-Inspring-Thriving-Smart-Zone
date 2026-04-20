@@ -232,7 +232,15 @@ func (s *Server) handleHit(packet []byte, clientAddr *net.UDPAddr) {
 		s.mu.Unlock()
 		return
 	}
-	room.Engine.UpdateHp(target, -hitPacket.Damage)
+	alive := room.Engine.UpdateHp(target, -hitPacket.Damage)
+	if !alive {
+		s.Sender.RoomBroadcast(
+			player.Room,
+			EncodeOverPacket(
+				&OverPacket{WinnerPlayerID: player.ID},
+			),
+		)
+	}
 
 	s.mu.Unlock()
 
