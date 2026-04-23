@@ -60,3 +60,15 @@ func (sm *SessionManager) Remove(sessionID string) {
 
 	delete(sm.sessions, sessionID)
 }
+
+func (sm *SessionManager) GetByPlayerID(playerID int32) (*Session, bool) {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+
+	for _, session := range sm.sessions {
+		if session.PlayerID == playerID {
+			return session, true
+		}
+	}
+	return nil, false
+}

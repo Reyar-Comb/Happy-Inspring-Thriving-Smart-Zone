@@ -12,6 +12,7 @@ func (s *Server) StartHTTP() error {
 
 	mux.HandleFunc("/api/login", s.HandleLogin)
 	mux.HandleFunc("/api/register", s.HandleRegister)
+	mux.HandleFunc("/api/username", s.HandleUsername)
 
 	addr := config.GlobalConfig.HTTPPort
 

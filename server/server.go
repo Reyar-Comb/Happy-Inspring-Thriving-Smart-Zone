@@ -84,21 +84,41 @@ func (s *Server) AddRoom(room *Room) {
 }
 
 func (s *Server) RemoveRoom(roomID int32) {
+	delete(s.AvailableRooms, roomID)
 	delete(s.Rooms, roomID)
 	fmt.Printf("Server: Removed room %d, total rooms: %d\n", roomID, len(s.Rooms))
 }
 
-func (s *Server) MatchRoom() *Room {
-	for _, room := range s.AvailableRooms {
-		if !room.IsFull() {
-			return room
+func (s *Server) MatchRoom(roomCode int32) *Room {
+	switch roomCode {
+
+	case 0: // 0 -> auto match
+		for _, room := range s.AvailableRooms {
+			if !room.IsFull() {
+				return room
+			}
 		}
+		room := NewRoom(s.RoomIdCounter)
+		s.RoomIdCounter++
+		s.AddRoom(room)
+		s.AvailableRooms[room.ID] = room
+		return room
+
+	case 1: // 1 -> create room
+		room := NewRoom(s.RoomIdCounter)
+		s.RoomIdCounter++
+		s.AddRoom(room)
+		s.AvailableRooms[room.ID] = room
+		return room
+
+	default: // specific room code
+		for _, room := range s.AvailableRooms {
+			if room.RoomCode == roomCode && !room.IsFull() {
+				return room
+			}
+		}
+		return nil
 	}
-	room := NewRoom(s.RoomIdCounter)
-	s.RoomIdCounter++
-	s.AddRoom(room)
-	s.AvailableRooms[room.ID] = room
-	return room
 }
 
 func (s *Server) GetRoomByPlayerId(pid int32) *Room {
@@ -122,28 +142,34 @@ func (s *Server) handlePacket(packet []byte, clientAddr *net.UDPAddr) {
 	switch opCode {
 	case OpJoin:
 		s.handleJoin(packet, clientAddr)
+	case OpReady:
+		s.handleReady(packet, clientAddr)
 	case OpLocationUpdate:
 		s.handleLocationUpdate(packet, clientAddr)
 	case OpHit:
 		s.handleHit(packet, clientAddr)
 	case OpShoot:
 		s.handleShoot(packet, clientAddr)
+	case OpLeave:
+		s.handleLeave(packet, clientAddr)
 	default:
 		fmt.Printf("Server: Received unknown packet from %s: %x\n", clientAddr, packet)
 	}
 }
 
 func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
-	if len(packet) < 5 {
+	if len(packet) < 9 {
 		return
 	}
 
 	sessionLen := int(binary.BigEndian.Uint32(packet[1:5]))
-	if len(packet) < 5+sessionLen {
+	if len(packet) < 9+sessionLen {
 		return
 	}
 
-	sessionID := string(packet[5 : 5+sessionLen])
+	roomCode := int32(binary.BigEndian.Uint32(packet[5:9]))
+
+	sessionID := string(packet[9 : 9+sessionLen])
 
 	s.mu.Lock()
 	session, exists := s.Sessions.Get(sessionID)
@@ -156,7 +182,20 @@ func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
 	session.LastActive = time.Now()
 	fmt.Printf("Server: Valid Player %s Joined, Sending PlayerID %d\n", sessionID, s.PlayerIdCounter)
 
-	room := s.MatchRoom()
+	room := s.MatchRoom(roomCode)
+	if room == nil {
+		fmt.Printf("Server: No available room for player %s with room code %d\n", sessionID, roomCode)
+		s.mu.Unlock()
+
+		s.Sender.SendTo(clientAddr, EncodeJoinAckPacket(
+			&JoinAckPacket{
+				PlayerID: -1,
+				State:    StWaiting,
+				RoomCode: -1,
+			},
+		))
+		return
+	}
 	playerID := s.PlayerIdCounter
 	s.PlayerIdCounter++
 
@@ -164,19 +203,67 @@ func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
 	room.AddPlayer(player)
 	s.PlayerRoomID[playerID] = room.ID
 
+	st := StWaiting
 	if room.IsFull() {
-		fmt.Println("Server: Room is full, removing from available rooms")
+		fmt.Printf("Server: Room %d is full, removing from available rooms\n", room.ID)
 		delete(s.AvailableRooms, room.ID)
+		st = StReady
 	}
 
 	s.mu.Unlock()
 
 	fmt.Printf("Server: Player %d joined room %d\n", playerID, room.ID)
-	s.Sender.SendTo(
-		player.Addr,
-		EncodeAcceptPacket(
-			&AcceptPacket{PlayerID: player.ID},
+	s.Sender.RoomBroadcast(
+		room,
+		EncodeJoinAckPacket(
+			&JoinAckPacket{
+				PlayerID: player.ID,
+				State:    st,
+				RoomCode: room.RoomCode,
+			},
 		))
+}
+
+func (s *Server) handleReady(packet []byte, clientAddr *net.UDPAddr) {
+	if len(packet) < 5 {
+		return
+	}
+
+	readyPlayerID := int32(binary.BigEndian.Uint32(packet[1:5]))
+
+	s.mu.Lock()
+	room := s.GetRoomByPlayerId(readyPlayerID)
+	if room == nil {
+		s.mu.Unlock()
+		return
+	}
+
+	player, exists := room.Players[readyPlayerID]
+	if !exists {
+		s.mu.Unlock()
+		return
+	}
+
+	st := StWaiting
+
+	isAllReady := player.Ready()
+	if isAllReady {
+		room.State = RoomPlaying
+		st = StReady
+		fmt.Printf("Server: All players in room %d are ready, starting game\n", room.ID)
+	}
+	s.mu.Unlock()
+
+	s.Sender.RoomBroadcast(
+		room,
+		EncodeReadyAckPacket(
+			&ReadyAckPacket{
+				PlayerID: player.ID,
+				State:    st,
+			},
+		),
+	)
+
 }
 
 func (s *Server) handleLocationUpdate(packet []byte, clientAddr *net.UDPAddr) {
@@ -277,5 +364,40 @@ func (s *Server) handleShoot(packet []byte, clientAddr *net.UDPAddr) {
 		room,
 		shootPacket.PlayerID,
 		EncodeShootPacket(shootPacket),
+	)
+}
+
+func (s *Server) handleLeave(packet []byte, clientAddr *net.UDPAddr) {
+	s.mu.Lock()
+	leavePacket, err := DecodeLeavePacket(packet)
+	if err != nil {
+		fmt.Printf("Server: Error decoding leave packet from %s: %v\n", clientAddr, err)
+		s.mu.Unlock()
+		return
+	}
+
+	room := s.GetRoomByPlayerId(leavePacket.PlayerID)
+	player, exists := room.Players[leavePacket.PlayerID]
+	if !exists {
+		s.mu.Unlock()
+		return
+	}
+
+	room.RemovePlayer(player.ID)
+	delete(s.PlayerRoomID, player.ID)
+
+	if room.IsEmpty() {
+		s.RemoveRoom(room.ID)
+	} else {
+		room.State = RoomWaiting
+		s.AvailableRooms[room.ID] = room
+	}
+	s.Sender.RoomBroadcast(
+		room,
+		EncodeLeaveAckPacket(
+			&LeaveAckPacket{
+				PlayerID: player.ID,
+			},
+		),
 	)
 }

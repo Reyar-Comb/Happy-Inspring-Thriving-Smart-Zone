@@ -6,14 +6,34 @@ import (
 )
 
 const (
-	OpJoin           byte = 0x01
-	OpAccept         byte = 0x02
-	OpLocationUpdate byte = 0x03
-	OpHpUpdate       byte = 0x04
-	OpShoot          byte = 0x05
-	OpHit            byte = 0x06
-	OpOver           byte = 0x07
+	OpJoin           byte = 0x01 //Client -> Server
+	OpJoinAck        byte = 0x02 //Server -> Client
+	OpLocationUpdate byte = 0x03 //Client -> Server, Server -> Client
+	OpHpUpdate       byte = 0x04 //Server -> Client
+	OpShoot          byte = 0x05 //Client -> Server, Server -> Client
+	OpHit            byte = 0x06 //Client -> Server
+	OpOver           byte = 0x07 //Server -> Client
+	OpReady          byte = 0x08 //Client -> Server
+	OpReadyAck       byte = 0x09 //Server -> Client
+	OpLeave          byte = 0x0A //Client -> Server
+	OpLeaveAck       byte = 0x0B //Server -> Client
 )
+
+const (
+	StWaiting byte = 0x00
+	StReady   byte = 0x01
+)
+
+type JoinPacket struct {
+	SessionID string
+	RoomCode  int32
+}
+
+type JoinAckPacket struct {
+	PlayerID int32
+	RoomCode int32
+	State    byte
+}
 
 type LocationPacket struct {
 	PlayerID int32
@@ -40,15 +60,59 @@ type HitPacket struct {
 	Damage   int32
 }
 
-type AcceptPacket struct {
-	PlayerID int32
-}
-
 type OverPacket struct {
 	WinnerPlayerID int32
 }
 
+type ReadyPacket struct {
+	PlayerID int32
+}
+
+type ReadyAckPacket struct {
+	PlayerID int32
+	State    byte
+}
+
+type LeavePacket struct {
+	PlayerID int32
+}
+
+type LeaveAckPacket struct {
+	PlayerID int32
+}
+
+type CreateRoomAckPacket struct {
+	RoomCode int32
+	PlayerID int32
+}
+
 var ErrInvalidPacket = errors.New("invalid packet")
+
+func EncodeJoinAckPacket(packet *JoinAckPacket) []byte {
+	buf := make([]byte, 13)
+	buf[0] = OpJoinAck
+	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
+	binary.BigEndian.PutUint32(buf[5:9], uint32(packet.RoomCode))
+	buf[9] = packet.State
+	return buf
+}
+
+func DecodeReadyPacket(data []byte) (*ReadyPacket, error) {
+	if len(data) < 5 {
+		return nil, ErrInvalidPacket
+	}
+	return &ReadyPacket{
+		PlayerID: int32(binary.BigEndian.Uint32(data[1:5])),
+	}, nil
+}
+
+func EncodeReadyAckPacket(packet *ReadyAckPacket) []byte {
+	buf := make([]byte, 5)
+	buf[0] = OpReadyAck
+	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
+	buf[5] = packet.State
+	return buf
+}
 
 func DecodeLocationPacket(data []byte) (*LocationPacket, error) {
 	if len(data) < 13 {
@@ -115,16 +179,25 @@ func EncodeShootPacket(packet *ShootPacket) []byte {
 	return buf
 }
 
-func EncodeAcceptPacket(packet *AcceptPacket) []byte {
-	buf := make([]byte, 5)
-	buf[0] = OpAccept
-	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
-	return buf
-}
-
 func EncodeOverPacket(packet *OverPacket) []byte {
 	buf := make([]byte, 5)
 	buf[0] = OpOver
 	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.WinnerPlayerID))
+	return buf
+}
+
+func DecodeLeavePacket(data []byte) (*LeavePacket, error) {
+	if len(data) < 5 {
+		return nil, ErrInvalidPacket
+	}
+	return &LeavePacket{
+		PlayerID: int32(binary.BigEndian.Uint32(data[1:5])),
+	}, nil
+}
+
+func EncodeLeaveAckPacket(packet *LeaveAckPacket) []byte {
+	buf := make([]byte, 5)
+	buf[0] = OpLeaveAck
+	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
 	return buf
 }

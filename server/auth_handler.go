@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -87,5 +88,29 @@ func (s *Server) HandleRegister(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(LoginResponse{
 		Success:   true,
 		SessionID: session.ID,
+	})
+}
+
+func (s *Server) HandleUsername(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	playerID, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 32)
+	if err != nil {
+		http.Error(w, "Invalid player ID", http.StatusBadRequest)
+		return
+	}
+	targetSession, exists := s.Sessions.GetByPlayerID(int32(playerID))
+	if !exists {
+		http.Error(w, "Player not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"username": targetSession.Username,
 	})
 }
