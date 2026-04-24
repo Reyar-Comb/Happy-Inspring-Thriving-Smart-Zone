@@ -190,7 +190,6 @@ func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
 		s.Sender.SendTo(clientAddr, EncodeJoinAckPacket(
 			&JoinAckPacket{
 				PlayerID: -1,
-				State:    StWaiting,
 				RoomCode: -1,
 			},
 		))
@@ -202,35 +201,50 @@ func (s *Server) handleJoin(packet []byte, clientAddr *net.UDPAddr) {
 	player := NewPlayer(clientAddr, playerID)
 	room.AddPlayer(player)
 	s.PlayerRoomID[playerID] = room.ID
-
-	st := StWaiting
-	if room.IsFull() {
-		fmt.Printf("Server: Room %d is full, removing from available rooms\n", room.ID)
-		delete(s.AvailableRooms, room.ID)
-		st = StReady
+	player1 := playerID
+	player1Ready := byte(0x00)
+	player2 := int32(-1)
+	player2Ready := byte(0x00)
+	if len(room.Players) == 2 {
+		for id := range room.Players {
+			if id != playerID {
+				player2 = id
+				break
+			}
+		}
 	}
 
 	s.mu.Unlock()
 
 	fmt.Printf("Server: Player %d joined room %d\n", playerID, room.ID)
-	s.Sender.RoomBroadcast(
-		room,
+	s.Sender.SendTo(
+		clientAddr,
 		EncodeJoinAckPacket(
 			&JoinAckPacket{
 				PlayerID: player.ID,
-				State:    st,
 				RoomCode: room.RoomCode,
 			},
 		))
+	s.Sender.RoomBroadcast(
+		room,
+		EncodeRoomUpdatePacket(
+			&RoomUpdatePacket{
+				PlayerID1: player1,
+				Ready1:    player1Ready,
+				PlayerID2: player2,
+				Ready2:    player2Ready,
+			},
+		),
+	)
 }
 
 func (s *Server) handleReady(packet []byte, clientAddr *net.UDPAddr) {
-	if len(packet) < 5 {
+	if len(packet) < 6 {
 		return
 	}
 
 	readyPlayerID := int32(binary.BigEndian.Uint32(packet[1:5]))
-
+	isReady := bool(packet[5] == 0x01)
 	s.mu.Lock()
 	room := s.GetRoomByPlayerId(readyPlayerID)
 	if room == nil {
@@ -243,23 +257,23 @@ func (s *Server) handleReady(packet []byte, clientAddr *net.UDPAddr) {
 		s.mu.Unlock()
 		return
 	}
-
-	st := StWaiting
-
-	isAllReady := player.Ready()
-	if isAllReady {
-		room.State = RoomPlaying
-		st = StReady
-		fmt.Printf("Server: All players in room %d are ready, starting game\n", room.ID)
+	if isReady {
+		player.SetReady()
+	} else {
+		player.SetUnready()
 	}
+	pid1, rdy1, pid2, rdy2 := room.GetReadyStatus()
+
 	s.mu.Unlock()
 
 	s.Sender.RoomBroadcast(
 		room,
-		EncodeReadyAckPacket(
-			&ReadyAckPacket{
-				PlayerID: player.ID,
-				State:    st,
+		EncodeRoomUpdatePacket(
+			&RoomUpdatePacket{
+				PlayerID1: pid1,
+				Ready1:    rdy1,
+				PlayerID2: pid2,
+				Ready2:    rdy2,
 			},
 		),
 	)
@@ -386,17 +400,24 @@ func (s *Server) handleLeave(packet []byte, clientAddr *net.UDPAddr) {
 	room.RemovePlayer(player.ID)
 	delete(s.PlayerRoomID, player.ID)
 
+	pid1, rdy1, pid2, rdy2 := room.GetReadyStatus()
+
 	if room.IsEmpty() {
 		s.RemoveRoom(room.ID)
 	} else {
 		room.State = RoomWaiting
 		s.AvailableRooms[room.ID] = room
 	}
+
+	s.mu.Unlock()
 	s.Sender.RoomBroadcast(
 		room,
-		EncodeLeaveAckPacket(
-			&LeaveAckPacket{
-				PlayerID: player.ID,
+		EncodeRoomUpdatePacket(
+			&RoomUpdatePacket{
+				PlayerID1: pid1,
+				Ready1:    rdy1,
+				PlayerID2: pid2,
+				Ready2:    rdy2,
 			},
 		),
 	)

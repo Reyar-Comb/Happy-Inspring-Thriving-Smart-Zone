@@ -83,6 +83,32 @@ func (r *Room) IsEmpty() bool {
 	return len(r.Players) == 0
 }
 
+func (r *Room) GetReadyStatus() (int32, byte, int32, byte) {
+	if len(r.Players) == 0 {
+		return -1, 0x00, -1, 0x00
+	} else if len(r.Players) == 1 {
+		for _, p := range r.Players {
+			return p.ID, p.Ready(), -1, 0x00
+		}
+	} else {
+		i := 0
+		var pid1, pid2 int32
+		var rdy1, rdy2 byte
+		for _, p := range r.Players {
+			if i == 0 {
+				pid1 = p.ID
+				rdy1 = p.Ready()
+			} else {
+				pid2 = p.ID
+				rdy2 = p.Ready()
+			}
+			i++
+		}
+		return pid1, rdy1, pid2, rdy2
+	}
+	return -1, 0x00, -1, 0x00
+}
+
 func GetAnotherPlayer(room *Room, player *Player) *Player {
 	for _, p := range room.Players {
 		if p.ID != player.ID {
@@ -99,12 +125,17 @@ func (p *Player) GetOpponent() *Player {
 	return GetAnotherPlayer(p.Room, p)
 }
 
-func (p *Player) Ready() bool {
+func (p *Player) SetReady() {
 	p.State = PlayerReady
-	for _, player := range p.Room.Players {
-		if player.State != PlayerReady {
-			return false
-		}
+}
+
+func (p *Player) SetUnready() {
+	p.State = PlayerWaiting
+}
+
+func (p *Player) Ready() byte {
+	if p.State == PlayerReady {
+		return 0x01
 	}
-	return true
+	return 0x00
 }

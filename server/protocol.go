@@ -7,16 +7,15 @@ import (
 
 const (
 	OpJoin           byte = 0x01 //Client -> Server
-	OpJoinAck        byte = 0x02 //Server -> Client
-	OpLocationUpdate byte = 0x03 //Client -> Server, Server -> Client
-	OpHpUpdate       byte = 0x04 //Server -> Client
-	OpShoot          byte = 0x05 //Client -> Server, Server -> Client
+	OpJoinAck        byte = 0x02 //Server -> Client (Answer)
+	OpLocationUpdate byte = 0x03 //Client -> Server, Server -> Client (Broadcast)
+	OpHpUpdate       byte = 0x04 //Server -> Client (Broadcast)
+	OpShoot          byte = 0x05 //Client -> Server, Server -> Client (Broadcast)
 	OpHit            byte = 0x06 //Client -> Server
-	OpOver           byte = 0x07 //Server -> Client
+	OpOver           byte = 0x07 //Server -> Client (Broadcast)
 	OpReady          byte = 0x08 //Client -> Server
-	OpReadyAck       byte = 0x09 //Server -> Client
-	OpLeave          byte = 0x0A //Client -> Server
-	OpLeaveAck       byte = 0x0B //Server -> Client
+	OpLeave          byte = 0x09 //Client -> Server
+	OpRoomUpdate     byte = 0x0A //Server -> Client (Broadcast)
 )
 
 const (
@@ -32,7 +31,6 @@ type JoinPacket struct {
 type JoinAckPacket struct {
 	PlayerID int32
 	RoomCode int32
-	State    byte
 }
 
 type LocationPacket struct {
@@ -66,52 +64,38 @@ type OverPacket struct {
 
 type ReadyPacket struct {
 	PlayerID int32
-}
-
-type ReadyAckPacket struct {
-	PlayerID int32
-	State    byte
+	IsReady  byte
 }
 
 type LeavePacket struct {
 	PlayerID int32
 }
 
-type LeaveAckPacket struct {
-	PlayerID int32
-}
-
-type CreateRoomAckPacket struct {
-	RoomCode int32
-	PlayerID int32
+type RoomUpdatePacket struct {
+	PlayerID1 int32
+	Ready1    byte
+	PlayerID2 int32
+	Ready2    byte
 }
 
 var ErrInvalidPacket = errors.New("invalid packet")
 
 func EncodeJoinAckPacket(packet *JoinAckPacket) []byte {
-	buf := make([]byte, 13)
+	buf := make([]byte, 9)
 	buf[0] = OpJoinAck
 	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
 	binary.BigEndian.PutUint32(buf[5:9], uint32(packet.RoomCode))
-	buf[9] = packet.State
 	return buf
 }
 
 func DecodeReadyPacket(data []byte) (*ReadyPacket, error) {
-	if len(data) < 5 {
+	if len(data) < 6 {
 		return nil, ErrInvalidPacket
 	}
 	return &ReadyPacket{
 		PlayerID: int32(binary.BigEndian.Uint32(data[1:5])),
+		IsReady:  data[5],
 	}, nil
-}
-
-func EncodeReadyAckPacket(packet *ReadyAckPacket) []byte {
-	buf := make([]byte, 5)
-	buf[0] = OpReadyAck
-	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
-	buf[5] = packet.State
-	return buf
 }
 
 func DecodeLocationPacket(data []byte) (*LocationPacket, error) {
@@ -195,9 +179,12 @@ func DecodeLeavePacket(data []byte) (*LeavePacket, error) {
 	}, nil
 }
 
-func EncodeLeaveAckPacket(packet *LeaveAckPacket) []byte {
-	buf := make([]byte, 5)
-	buf[0] = OpLeaveAck
-	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID))
+func EncodeRoomUpdatePacket(packet *RoomUpdatePacket) []byte {
+	buf := make([]byte, 17)
+	buf[0] = OpRoomUpdate
+	binary.BigEndian.PutUint32(buf[1:5], uint32(packet.PlayerID1))
+	buf[5] = packet.Ready1
+	binary.BigEndian.PutUint32(buf[6:10], uint32(packet.PlayerID2))
+	buf[10] = packet.Ready2
 	return buf
 }
